@@ -4,7 +4,7 @@ Here we develope a code for a two-dimensional lattice with particles that follow
 
 Open issues:
 - Find a way to visualize the changes between gaussian distributions with different standard deviations
-- Format the movie to be more understandable
-
+  
 Future additions:
-- Color-scale representation of the velocities/jumping rates
+- Assign to each particle a jumping rate and a color
+- Write the simulation as a fuction to apply JIT on it
