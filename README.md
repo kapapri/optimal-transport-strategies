@@ -2,9 +2,6 @@
 
 Here we develope a code for a two-dimensional lattice with particles that follow TASEP (Total Asymmetric Simple Exclusion Process). 
 
-Open issues:
-- Find a way to visualize the changes between gaussian distributions with different standard deviations
-  
 Future additions:
-- Assign to each particle a jumping rate and a color
 - Write the simulation as a fuction to apply JIT on it
+- DQN method 
