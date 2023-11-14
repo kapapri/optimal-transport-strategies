@@ -1,3 +1,7 @@
+# ==================================================
+# Generation of the System and Utilities
+# ==================================================
+
 # Environment consisting on a (Lx*Ly) array as a grid with discrete sites that can have value 0 (empty) or 1 (occupied by an agent). It can start with a random distribution of n agents or a chess fashion filling homogeneously the lattice.
 
 # Optimization: Crossing the right boundary and avoid the rest of agents with the least number of steps, so the rewards are distributed in order to get that result.

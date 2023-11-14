@@ -8,6 +8,7 @@ gym_environments.egg-info/top_level.txt
 gym_environments/envs/FrozenLake.py
 gym_environments/envs/GridWorld.py
 gym_environments/envs/Lattice.py
+gym_environments/envs/LatticeTASEP.py
 gym_environments/envs/__init__.py
 gym_environments/wrappers/__init__.py
 gym_environments/wrappers/clip_reward.py

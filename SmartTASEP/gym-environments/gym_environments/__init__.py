@@ -1,6 +1,10 @@
 from gymnasium.envs.registration import register
 
 register(
+    id="gym_environments/LatticeTASEP-v0",
+    entry_point="gym_environments.envs:LatticeTASEPEnv",
+)
+register(
     id="gym_environments/Lattice-v0",
     entry_point="gym_environments.envs:LatticeEnv",
 )
