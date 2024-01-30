@@ -17,24 +17,7 @@ import pygame
 # ==================================================
 # Generation of the System and Utilities
 # ==================================================
-@njit
-def trunc_gaussian_sample(mu, sigma):
-    """
-    It returns a sample of a gaussian, with mean mu and standard deviation sigma, only if it is in the [0, 1] interval
-    """
-    sample = -1
-    while sample < 0 or sample > 1:
-        sample = np.random.normal(mu, sigma)
-    return sample    
-
-@njit
-def truncated_gaussian(mu, sigma, size):
-    samples = np.zeros(size, dtype=np.float32)
-    for i in range(size):
-        samples[i] = trunc_gaussian_sample(mu, sigma)   
-    return samples
-
-def checkerboard(Lx, Ly, mu, sigma, n = False): 
+def checkerboard(Lx, Ly, n = False): 
     """ 
     Filling the lattice with particles alternatively (chess fashion).
     
@@ -52,15 +35,16 @@ def checkerboard(Lx, Ly, mu, sigma, n = False):
     
     System = np.zeros((Ly, Lx), dtype=np.int32)  # Ly vectors with Lx (zero) components 
     JumpRateGrid = np.zeros((Ly,Lx), dtype=np.float32)
-    k = 0    
+
+    k = 0
     for i in range(Ly):
         for j in range(Lx):
             if Map[i][j] == 1:
-                #JumpRateGrid[i][j] = trunc_gaussian_sample(mu, sigma)
                 JumpRateGrid[i][j] = random.choice([0.1, 1])
                 System[i][j] = Labels[k]
                 k += 1
-                
+
+
     return System, JumpRateGrid
 
 
@@ -153,10 +137,10 @@ class LatticeTASEP(gym.Env):
 
     # Translates the environment’s state into an observation
     def _get_obs(self):
-        return self.JumpRateGrid
+        return self.System
     
     def get_jumping_rates(self):
-        return self.JumpRateGrid    # A bit unnecessary, clean it in the future
+        return self.JumpRateGrid   
 
     # Auxiliary information
     def _get_info(self):
@@ -183,15 +167,28 @@ class LatticeTASEP(gym.Env):
         super().reset(seed=seed)
  
         # Choose the agents location with the mode function
-        self.System, self.JumpRateGrid = self.mode(self.Lx, self.Ly, self.mu, self.sigma, self.n)
+        self.System, self.JumpRateGrid= self.mode(self.Lx, self.Ly, self.n)
 
-        observation = self._get_obs()
+        # NN input
+        FastChannel = np.zeros((self.Ly, self.Lx), dtype=np.int32)  
+        SlowChannel = np.zeros((self.Ly, self.Lx), dtype=np.int32)             
+        for i in range(self.Ly):
+            for j in range(self.Lx):
+                if self.JumpRateGrid[i][j] == 1:
+                    FastChannel[i][j] = 1
+                elif self.JumpRateGrid[i][j] != 0:
+                    SlowChannel[i][j] = 1
+        NN_input = np.concatenate((FastChannel, SlowChannel))
+
+
+        observation= self._get_obs()
+        velocities = self.get_jumping_rates()
         info = self._get_info()
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, info
+        return observation, velocities, NN_input, info
     
 
     def step(self, action, log = False):       
@@ -209,7 +206,7 @@ class LatticeTASEP(gym.Env):
         self.step_counter += 1
         System = self.System.copy() # Apparently without that the initial observation updates every time a step is done
         JumpRateGrid = self.JumpRateGrid.copy()
-        reward = self.reward
+        reward = float(self.reward)
         
         # Search the coordinates of that particle (action)
         X,Y = locating_particle(Lx, Ly, action, System)
@@ -220,7 +217,7 @@ class LatticeTASEP(gym.Env):
                       3, 4, 5                 (1,0), (1,1), (1,2)
         """           
         
-        # TASEP, deciding direction: p=1/2 of jumping foward, p=1/4 of jumping up or down                  
+        # TASEP, deciding direction: p=1/2 of jumping forward, p=1/4 of jumping up or down                  
         dice = random.randint(0, 1)
         if dice == 0:
             JumpAlong = 0
@@ -237,13 +234,16 @@ class LatticeTASEP(gym.Env):
         xPrev = Ly - 1 if X == 0 else X - 1        
         xNext = 0 if X == Ly - 1 else X + 1
         yNext = 0 if Y == Lx - 1 else Y + 1
+        yPrev = Lx - 1 if Y == 0 else Y - 1
+
         
-    # BORRAMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE EN ALGUN MOMENTO
-    # Modifications:
+     # BORRAMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE EN ALGUN MOMENTO
+     # Modifications:
+        #JumpRate = 1 # It always jumps
+
         # 1D TASEP        
         # JumpAlong = 0 # Jumps only forwards
         # JumpTransverse = 2 # No jump up or down                
-        #JumpRate = 1 # It always jumps
         
         # Updating the system
         if dice_jump < JumpRate:
@@ -254,43 +254,158 @@ class LatticeTASEP(gym.Env):
                     Along_step = 1
                     reward = 1
                     if log == True:
-                        print("Hop forward")                     
+                        print("    Hop forward")
+                        print("    instant reward", reward)                         
                     
-                else:
-                    if log == True:
-                        print("Site occupied: No ha podido saltar palante :(")                    
+                else:                  
                     reward = -10
+                    if log == True:
+                        print("    Site occupied: No ha podido saltar palante :(")
+                        print("    instant reward", reward)                         
+
                     
             if JumpTransverse == 0: # hop up
                 if System[xPrev][Y] == 0: 
                     System[X][Y], System[xPrev][Y] = System[xPrev][Y], System[X][Y]
                     JumpRateGrid[X][Y], JumpRateGrid[xPrev][Y] = JumpRateGrid[xPrev][Y], JumpRateGrid[X][Y]
                     Transv_step = 1
-                    reward = -5
+                    reward = 0
                     if log == True:                    
-                        print("Hop up")
+                        print("    Hop up")
+                        print("    instant reward", reward)                   
+
                 else:
-                    if log == True:                    
-                        print("Site occupied: Attempt to hop up")        
                     reward = -10
+                    if log == True:                    
+                        print("    Site occupied: Attempt to hop up")
+                        print("    instant reward", reward)                         
 
             if JumpTransverse == 1: # hop down
                 if System[xNext][Y] == 0: 
                     System[X][Y], System[xNext][Y] = System[xNext][Y], System[X][Y]
                     JumpRateGrid[X][Y], JumpRateGrid[xNext][Y] = JumpRateGrid[xNext][Y], JumpRateGrid[X][Y]
                     Transv_step = -1
-                    reward = -5
+                    reward = 0
                     if log == True:                                        
-                        print("Hop down")                     
+                        print("    Hop down")
+                        print("    instant reward", reward)                   
+
                     
                 else:
                     reward = -10
                     if log == True:                                        
-                        print("Site occupied: Attempt to hop down")                         
+                        print("    Site occupied: Attempt to hop down")
+                        print("    instant reward", reward)  
+                                             
+            # Clustering reward
+            # Update of boundary conditions !!!!!!!!!!!!!!!!!!!
+            xPrev = Ly - 1 if xPrev == 0 else xPrev - 1        
+            xNext = 0 if xNext == Ly - 1 else xNext + 1
+            yNext = 0 if yNext == Lx - 1 else yNext + 1
+            yPrev = Lx - 1 if yPrev == 0 else yPrev - 1
+
+            d_c = 1 # Equilibrium distance
+            K = 1 # LJ constant
+            r = 1/d_c # Nearest neighbours
+
+            Dfront,Dback,Dup,Ddown = 0, 0, 0, 0
+            LJfront,LJback,LJup,LJdown = 0, 0, 0, 0
+            fast_count = 0
+            slow_count = 0
+
+
+            # Nearest neighbours 
+            print(System)          
+            if System[X][yNext] != 0:
+                print('forward occupied')
+                print(System[X][yNext])
+                Dfront = abs(JumpRateGrid[X][yNext] - JumpRate)
+                #LJfront = 1/r**2 - 1/r
+
+                if JumpRateGrid[X][yNext] == 1:
+                    fast_count += 1
+                elif JumpRateGrid[X][yNext] != 0:
+                    slow_count += 1 
+
+            if System[X][yPrev] != 0:
+                print('back occupied')
+                print(System[X][yPrev])                
+                Dback = abs(JumpRateGrid[X][yPrev] - JumpRate)
+                #LJback = 1/r**2 - 1/r
+
+                if JumpRateGrid[X][yPrev] == 1:
+                    fast_count += 1
+                elif JumpRateGrid[X][yPrev] != 0:
+                    slow_count += 1
+
+            if System[xNext][Y] != 0:
+                print('down occupied')
+                print(System[xNext][Y])                
+                Dup = abs(JumpRateGrid[xNext][Y] - JumpRate)
+                #LJup = 1/r**2 - 1/r
+
+                if JumpRateGrid[xNext][Y] == 1:
+                    fast_count += 1
+                elif JumpRateGrid[xNext][Y] != 0:
+                    slow_count += 1                   
+
+            if System[xPrev][Y] != 0:
+                print('up occupied')
+                print(System[xPrev][Y])                
+
+                Ddown = abs(JumpRateGrid[xPrev][Y] - JumpRate)   
+                #LJdown = 1/r**2 - 1/r
+
+                if JumpRateGrid[xPrev][Y] == 1:
+                    fast_count += 1
+                elif JumpRateGrid[xPrev][Y]  != 0:
+                    slow_count += 1               
+                    
+            JumpRate_diff = (-1)*float(Dfront + Dback + Dup + Ddown)
+            #LJ_function = (-K)*int(LJfront + LJback + LJup + LJdown)
+            LJ_function = 0
+            reward += JumpRate_diff + LJ_function            
+
+            if log == True:
+                print("fast_count", fast_count)
+                print("slow_count", slow_count)
+
+                # print("Dfront", Dfront)
+                # print("Dback", Dback) 
+                # print("Dup", Dup) 
+                # print("Ddown", Ddown) 
+
+                print("    JumpRate_diff", JumpRate_diff)         
+                #print("LJ_function", LJ_function)                   
+                print("    instant reward after jr difference", reward)
+
+
+            if JumpRate == 1:
+                reward += fast_count - 10*slow_count
+
+            if JumpRate != 0:
+                reward += -10*fast_count + slow_count
+                                
+            if log == True:
+                print("    instant reward after counting numbers", reward)   
+
         else:
             if log == True:
-                print("Sin velocidad")                       
+                print("    Sin velocidad") 
+
+                                    
                     
+        # NN input
+        FastChannel = np.zeros((Ly, Lx), dtype=np.int32)  
+        SlowChannel = np.zeros((Ly, Lx), dtype=np.int32)             
+        for i in range(Ly):
+            for j in range(Lx):
+                if JumpRateGrid[i][j] == 1:
+                    FastChannel[i][j] = 1
+                elif JumpRateGrid[i][j] != 0:
+                    SlowChannel[i][j] = 1
+        NN_input = np.concatenate((FastChannel, SlowChannel))
+
         self.JumpRateGrid = JumpRateGrid
         self.System = System
         self.reward = reward
@@ -300,6 +415,7 @@ class LatticeTASEP(gym.Env):
             truncated = True
                 
         observation = self._get_obs()
+        state = self.get_jumping_rates()        
         info = self._get_info()
 
         if self.render_mode == "human":
@@ -309,7 +425,7 @@ class LatticeTASEP(gym.Env):
         info["Transv_Steps"] = Transv_step
                 
 
-        return observation, self.reward, False, truncated, info
+        return observation, state, NN_input, self.reward, False, truncated, info
     
 
     # ==================================================

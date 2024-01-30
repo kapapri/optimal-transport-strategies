@@ -100,7 +100,7 @@ class Visualization():
         ax1.plot(x1[5:], self.CurrentAlongTot[5:], '.', label='Parallel Current')
 
         # Choose the window size for the moving average
-        window_size = 50
+        window_size = 25
         # Calculate the moving average
         moving_avg = self.moving_average(self.CurrentAlongTot[5:], window_size)
         # Adjust time to match the moving average length

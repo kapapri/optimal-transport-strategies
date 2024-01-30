@@ -70,7 +70,7 @@ class Dynamics():
         i = 0    
         for iwalk in tqdm(range(runsNumber)):
             if self.log == True:
-                print('Run Number', iwalk)
+                print('- Run Number', iwalk)
          # Memory allocation
             CurrentAlong = np.zeros(totalMCS, dtype=np.float32)
             # Learning tracking
@@ -78,40 +78,43 @@ class Dynamics():
             reward_count = 0        
             loss_sample = None
          # Initialize the environment and get its state    
-            System, info = self.env.reset()
-            state = torch.tensor(np.reshape(System, (1, Lx*Ly)), dtype=torch.float32, device=self.device)
+            Init_System, velocities, NN_input, info = self.env.reset()
+            state = torch.tensor(np.reshape(NN_input, (1, 2*Lx*Ly)), dtype=torch.float32, device=self.device)
             # Animation storage
             JumpRate_movie[0] = self.env.get_jumping_rates()
             JumpRate_short_movie[0] = self.env.get_jumping_rates()
             k = 1            
             if self.log == True:
-                print('Initial State:', state)
+                print('Initial System:\n', Init_System)
+                print('    Initial NN_input: \n', NN_input) 
 
             for istep in range(totalMCS):
                 if self.log == True:
-                    print('MCS Number', istep)
+                    print(' - MCS Number', istep)
                 Along_count = 0
-                for moveAttempt in range(N): # To make a move over all particles           
+                for moveAttempt in range(N): # To make a move over all particles
+                    if self.log == True:
+                        print('  - moveAttempt', moveAttempt)                               
                     #action =  Dynamics.select_particle_random(self)
                     action = Dynamics.select_action(self, state, policy_net)
-                    observation, reward, terminated, truncated, info = self.env.step(action.item(), log = self.log)
-                    reward = torch.tensor([reward], device=self.device)
+                    if self.log == True:
+                        print('    particle chosen:', int(action))                    
+                    System, velocities, observation, reward, terminated, truncated, info = self.env.step(action.item(), log = self.log)
+                    reward = torch.tensor([reward], device=self.device, dtype=torch.float32)
                  # Updates
                     reward_count += reward # Cumulated reward
                     Along_count += info["Along_Steps"]
                     #print('Along_count', Along_count)
-                    next_state = torch.tensor(np.reshape(observation, (1, Lx*Ly)), dtype=torch.float32, device=self.device)
+                    next_state = torch.tensor(np.reshape(observation, (1, 2*Lx*Ly)), dtype=torch.float32, device=self.device)
                  # Store the transition in memory
                     memory.push(state, action, next_state, reward)
 
                     if self.log == True:
-                        print('moveAttempt', moveAttempt)
-                        print('state', state)
-                        print('action done', action)
-                        print('next state', observation)
-                        print('reward', reward)                                
-                        print('reward_count', reward_count) 
-                        print('Replay Memory Random Sample', memory.sample(1))
+                        print('    next state: \n', System)
+                        print('    final reward:', float(reward))                                
+                        print('    reward_count:', float(reward_count))
+                        print('    NN_input: \n', observation) 
+                        #print('Replay Memory Random Sample', memory.sample(1))
 
                 # Move to the next state
                     state = next_state
