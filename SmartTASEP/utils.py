@@ -40,7 +40,7 @@ def load_data_from_file(file_path, dicti):
         return dicti
     
 class Storage():
-    def __init__(self, env_params, rl_params, runsNumber, totalMCS):
+    def __init__(self, env_params, rl_params, runsNumber, episodes):
         Lx = env_params['Lx']
         Ly = env_params['Ly']
         fixed_sigma = env_params['fixed_sigma']
@@ -52,26 +52,44 @@ class Storage():
         TAU = rl_params['TAU']
         LR = rl_params['LR']
 
-        self.hyperparameters = {'size':[Lx, Ly], 'sigma': fixed_sigma, 'runsNumber':runsNumber, 'totalMCS': totalMCS, 
+        self.hyperparameters = {'size':[Lx, Ly], 'sigma': fixed_sigma, 'runsNumber':runsNumber, 'episodes': episodes, 
                              'BATCH_SIZE': BATCH_SIZE , 'GAMMA': GAMMA, 'EPS_START':EPS_START, 'EPS_END':EPS_END, 'EPS_DECAY':EPS_DECAY, 'TAU':TAU, 'Learning Rate':LR}
         self.training_storage = {}
         self.data_storage = {}
 
-    def update_dictionaries(self, policy_net, target_net, memory, CurrentAlongTot, lossTot, rewardsTot):
+    def update_dictionaries(self, runsNumber, episodes, policy_net, target_net, memory, CurrentAlongTot, CurrentAlongPerRun, lossTot, rewardsTot, JumpRate_short_Tot, Load, data_storage):
 
         self.training_storage['policy_NN'] = policy_net.state_dict()
         self.training_storage['target_NN'] = target_net.state_dict()
         self.training_storage['memory'] = memory.whole_list()
         self.training_storage['hyperparameters'] = self.hyperparameters
+        self.training_storage['hyperparameters']['runsNumber'] = runsNumber
+        self.training_storage['hyperparameters']['episodes'] = episodes
 
-        self.data_storage['consecutive_current'] = CurrentAlongTot
-        self.data_storage['average_loss'] = lossTot
-        self.data_storage['cumulative_reward'] = rewardsTot
+        if Load == True:
+            # print(data_storage['consecutive_current'])
+            self.data_storage['consecutive_current'] = np.concatenate((data_storage['consecutive_current'], CurrentAlongTot))
+            self.data_storage['CurrentAlongPerRun'] = np.concatenate((data_storage['CurrentAlongPerRun'], CurrentAlongPerRun))
+            self.data_storage['average_loss'] = np.concatenate((data_storage['average_loss'], lossTot))
+            self.data_storage['cumulative_reward'] = np.concatenate((data_storage['cumulative_reward'], rewardsTot))
+            self.data_storage['JumpRate_short_Tot'] = np.concatenate((data_storage['JumpRate_short_Tot'], JumpRate_short_Tot))
+
+        else:
+            self.data_storage['consecutive_current'] = CurrentAlongTot
+            self.data_storage['CurrentAlongPerRun'] = CurrentAlongPerRun
+            self.data_storage['average_loss'] = lossTot
+            self.data_storage['cumulative_reward'] = rewardsTot
+            self.data_storage['JumpRate_short_Tot'] = JumpRate_short_Tot
+
+        # self.data_storage['consecutive_current'] = CurrentAlongTot        
+        # self.data_storage['average_loss'] = lossTot
+        # self.data_storage['cumulative_reward'] = rewardsTot
         self.data_storage['hyperparameters'] = self.hyperparameters
+        self.data_storage['hyperparameters']['runsNumber'] = runsNumber
+        self.data_storage['hyperparameters']['episodes'] = episodes
 
         return self.training_storage, self.data_storage
 
-    
 
 # ==================================================
 # Visualization functions
@@ -80,10 +98,11 @@ class Visualization():
     def __init__(self, data_storage):
         data_storage = load_data_from_file('data_storage.pkl', data_storage)
         self.CurrentAlongTot = data_storage['consecutive_current']
+        self.CurrentAlongPerRun = data_storage['CurrentAlongPerRun']
         self.lossTot = data_storage['average_loss']
         self.rewardsTot = data_storage['cumulative_reward']
         self.runsNumber = data_storage['hyperparameters']['runsNumber']
-        self.totalMCS = data_storage['hyperparameters']['totalMCS']
+        self.episodes = data_storage['hyperparameters']['episodes']
         #For plot with several sigmas
         # env = LatticeTASEP(env_params)
         # playground = Dynamics(env_params, rl_params, device, log = False)
@@ -92,11 +111,11 @@ class Visualization():
     def moving_average(self, data, window_size):
         return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
     
-    def create_combined_plot(self, Lx, Ly, sigma, LR, save = False):      
+    def create_combined_plot(self, Lx, Ly, sigma, LR, lines, save = False):      
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 12))
 
         # Plot for current
-        x1 = np.array(range(self.totalMCS * self.runsNumber))
+        x1 = np.array(range(self.CurrentAlongTot.size))
         ax1.plot(x1[5:], self.CurrentAlongTot[5:], '.', label='Parallel Current')
 
         # Choose the window size for the moving average
@@ -107,26 +126,50 @@ class Visualization():
         adjusted_time = x1[:len(moving_avg)] 
         
         ax1.plot(adjusted_time, moving_avg)    
-        ax1.set_title('Current per N jumps')
-        ax1.set_xlabel('TotalMCS*Runs')    
+        ax1.set_title('Current per unit time (N move attempts)')
+        ax1.set_xlabel('episodes*Runs')    
         #ax1.legend()
+
+        # # Plot for current overlapping
+        # x1 = np.array(range(self.CurrentAlongPerRun[0].size))
+        # orig_map = plt.cm.get_cmap('hsv') 
+        # reversed_map = orig_map.reversed() 
+        # colors = reversed_map(np.linspace(0, 1, self.runsNumber))
+        # if self.runsNumber - lines < 0:
+        #     start = 0
+        # else:
+        #     start = self.runsNumber - lines
+        # for i in range(start, self.runsNumber):
+        #     # ax1.plot(x1, self.CurrentAlongPerRun[i,:], '.')
+
+        #     # Choose the window size for the moving average
+        #     window_size = 10
+        #     # Calculate the moving average
+        #     moving_avg = self.moving_average(self.CurrentAlongPerRun[i,:], window_size)
+        #     # Adjust time to match the moving average length
+        #     adjusted_time = x1[:len(moving_avg)]
+        #     ax1.plot(adjusted_time, moving_avg, linewidth=2, label='Run %i' % (i), color=colors[i])
+                
+        #     ax1.set_title('Current per unit time (N move attempts)')
+        #     ax1.set_xlabel('Episodes (episodes) [t=1/N]')    
+        #     ax1.legend(ncol=2)        
 
         # Plot for loss
         x2 = np.array(range(self.lossTot.size))
-        ax2.plot(x2, self.lossTot, label='Loss')
-        ax2.set_title('Average loss of each episode')
-        ax3.set_xlabel('Runs')
+        ax2.plot(x2, self.lossTot, label='Loss', color = 'firebrick')
+        ax2.set_title('Average loss over each episode')
+        ax2.set_xlabel('Runs')
 
         # Plot for reward
         x3 = np.array(range(self.rewardsTot.size))    
-        ax3.plot(x3, self.rewardsTot, label='Rewards')
-        ax3.set_title('Cumulated rewards over each epsiode')
+        ax3.plot(x3, self.rewardsTot, label='Rewards', color = 'forestgreen')
+        ax3.set_title('Cumulated reward over each episode')
         ax3.set_xlabel('Runs')
         # ax3.set_ylim([-1000, 300])
 
         plt.tight_layout()  # Adjust layout to prevent overlap
         if save == True:
-            plt.savefig(f'Pictures/Learning_simple_system{Lx}x{Ly}_Sigma{sigma}_{LR}.pdf')
+            plt.savefig(f'Pictures/System{Lx}x{Ly}_Runs{self.runsNumber}_episodes{self.episodes}_LearningRate{LR}.pdf')
         
         plt.show()
 
@@ -135,7 +178,7 @@ class Visualization():
         plt.xlabel('Time')
         plt.ylabel(f'Loss')
     
-        x_axis=np.array(range(self.runsNumber * self.totalMCS * self.N))
+        x_axis=np.array(range(self.runsNumber * self.episodes * self.N))
         plt.plot(x_axis[5:], loss[5:], label='Loss')
 
     def create_animation(self, Frames_movie):
@@ -147,7 +190,7 @@ class Visualization():
         im = ax.imshow(cv0, cmap="gnuplot")
         cb = fig.colorbar(im, cax=cax)
         
-        tx2 = ax.set_title('Frame 0 after one MCS of the last run', y=1)
+        tx2 = ax.set_title('Frame 0 after one episode of the last run', y=1)
         
         ax.axis('off')
         plt.close()  # To not have the plot of frame 0
@@ -180,9 +223,9 @@ class Visualization():
         # prob_occ= 1 # we make a transition only when the site chosen is occupied
         prob_vac= 1/2 #density of particles in the system
         prob_occ= 1/2 # we make a transition only when the site chosen is occupied    
-        f = np.array([r*p*prob_occ*prob_vac] * self.totalMCS)
+        f = np.array([r*p*prob_occ*prob_vac] * self.episodes)
         
-        x_axis=np.array(range(self.totalMCS))
+        x_axis=np.array(range(self.episodes))
         
         # Choose the window size for the moving average
         window_size = 50
@@ -204,10 +247,10 @@ class Visualization():
     # Benchmark plots (with several sigmas)
     # ==================================================  
     def currents_sigmas(self, sigmas): 
-        Currents = np.zeros((self.totalMCS, len(sigmas)), dtype= np.float32)
+        Currents = np.zeros((self.episodes, len(sigmas)), dtype= np.float32)
         i = 0
         for sigma in sigmas:
-            CurrentAlongTot, lossTot, rewardsTot, JumpRate_movie, JumpRate_short_movie = playground.simulate(self.runsNumber, self.totalMCS, memory, policy_net, target_net, optimizer)
+            CurrentAlongTot, lossTot, rewardsTot, JumpRate_movie, JumpRate_short_movie = playground.simulate(self.runsNumber, self.episodes, memory, policy_net, target_net, optimizer)
 
             Currents[:,i] = self.CurrentAlongTot
             i += 1

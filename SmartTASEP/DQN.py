@@ -4,6 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from collections import namedtuple, deque
 
+# Reproducibility
+# random.seed(1234)
+# torch.manual_seed(1234)
+
 # ==================================================
 # Replay Memory/Replay Buffer
 # ==================================================
@@ -48,21 +52,42 @@ class DQN(nn.Module):
         # Si es un int, state = torch.tensor(state, dtype=torch.float32).view(1,1)
         # Si es una matriz, se reduce la dimensionalidad del input state = torch.tensor(np.reshape(state, (1,16)), dtype=torch.float32)
 
-
-    def __init__(self, n_observations, n_actions):
+    def __init__(self, n_observations, n_actions, hidden_sizes = None, activation_function = nn.ReLU()):
         super(DQN, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128)  # torch.nn.functional.linear(input_dims, weight_dims, bias=None): y=x*W+b
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, n_actions)
-
-   
-    # Called with either one element to determine next action, or a batch
-    # during optimization. Returns tensor([[left0exp,right0exp]...]).
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
+        self.layers = []
+        if activation_function is None:
+            activation_function = nn.ReLU()        
         
-        return self.layer3(x)
+        if hidden_sizes is None:
+                raise ValueError("hidden_sizes must be specified")
+        # check if hidden_sizes is iterable
+        if not hasattr(hidden_sizes, "__iter__"):
+            raise ValueError("hidden_sizes must be iterable")
+
+        # build layers
+        if len(hidden_sizes) == 0:
+            self.layers.append(nn.Linear(n_observations, n_actions))
+        else:
+            self.layers.append(nn.Linear(n_observations, hidden_sizes[0]))
+            self.layers.append(activation_function)
+            for i in range(len(hidden_sizes) - 1):
+                self.layers.append(nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
+                self.layers.append(activation_function)
+            self.layers.append(nn.Linear(hidden_sizes[-1], n_actions))
+
+        self.model = nn.Sequential(*self.layers)
+        
+
+    def forward(self, x):
+        """
+        The forward method defines the forward pass of the policy network.
+        Args:
+            x: The input tensor. This is the state or batch of states.
+
+        Returns:
+            The output tensor. This is the action or batch of actions.
+        """
+        return self.model(x)
 
 def optimization(memory, policy_net, target_net, device, BATCH_SIZE, GAMMA, TAU, optimizer, loss_count):   
     # Perform one step of the optimization (on the policy network)
@@ -75,12 +100,7 @@ def optimization(memory, policy_net, target_net, device, BATCH_SIZE, GAMMA, TAU,
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
     batch = Transition(*zip(*transitions))
-
-#Check if this is necessary
-    # Compute a mask of non-final states and concatenate the batch elements
-    # (a final state would've been the one after which simulation ended)
-    non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), device=device, dtype=torch.bool) # returns a set of booleans
-                                                                                                                            #The map() function runs a lambda function over a list building a list-like collection of the results 
+ 
     non_final_next_states = torch.cat([s for s in batch.next_state if s is not None]) # creates a list of non-empty next states
 
     state_batch = torch.cat(batch.state)
@@ -97,7 +117,7 @@ def optimization(memory, policy_net, target_net, device, BATCH_SIZE, GAMMA, TAU,
     # Gather tells which Q from [Q1,...,QN] row to take, using action_batch vector, and returns BATCH-sized vector of Q(s_t, a) values
     #print(action_batch - 1)
     state_values = policy_net(state_batch)
-    state_action_values = state_values.gather(1, action_batch - 1) # index = action_batch-1, so the indexes start at 0
+    state_action_values = state_values.gather(1, action_batch - 1) # index = action_batch-1, so the indexes start at 0 (action space goes from 1 to n)
                                                                 # torch.gather(input, dim, index). Following the indexing structure (aling a specific dim), 
                                                                 # it takes values of the input
     # For DQN_Check and Simple_Environment:
@@ -108,14 +128,13 @@ def optimization(memory, policy_net, target_net, device, BATCH_SIZE, GAMMA, TAU,
     #  This is merged based on the mask, such that we'll have either the expected state value or 0 in case the state was final.
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
     with torch.no_grad(): # # Evaluating the model with torch.no_grad() ensures that no gradients are computed 
-        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
+        next_state_values = target_net(non_final_next_states).max(1).values
 
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
     # Compute Huber loss
     criterion = nn.SmoothL1Loss()
-    #criterion = nn.L1Loss()
     loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
 
     # Optimize the model
